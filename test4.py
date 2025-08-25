@@ -1,119 +1,147 @@
 import numpy as np
-from numba import njit
-from filterpy.kalman import UnscentedKalmanFilter as UKF, MerweScaledSigmaPoints
+import torch
+import torch.nn as nn
+import matplotlib.pyplot as plt
 
-# ---------------- Simulation parameters ----------------
-n = 10000              # number of coherent states
-m = 20                 # modulation variance
-t = 0.9                # channel transmittance
-h = 0.85               # setup efficiency
-s = 0.01               # Gaussian noise variance (per quadrature)
-phase_var = 1e-1       # AR(1) innovation variance
-ar_coeff = 0.99        # AR(1) coefficient
 
-# ------------------- MAIN LOOP -------------------------
+# Your system model:
+# θ_{k+1} = θ_k + q_k  (state equation)
+# y_k = x_k * θ_k + w_k  (measurement equation)
 
-# 1. Alice prepares states
-q = np.random.normal(0, np.sqrt(m - 1), n)
-p = np.random.normal(0, np.sqrt(m - 1), n)
+class KalmanNetTSP(nn.Module):
+    def __init__(self, state_dim=1, measurement_dim=1):
+        super(KalmanNetTSP, self).__init__()
+        self.state_dim = state_dim
+        self.measurement_dim = measurement_dim
 
-# 2. Channel transmission with phase noise (thermal-loss + AR(1) phase drift)
-qB = np.empty(n, dtype=np.float64)
-pB = np.empty(n, dtype=np.float64)
-zq = np.random.normal(0, np.sqrt(s), n)
-zp = np.random.normal(0, np.sqrt(s), n)
+        # Network layers (architecture based on KalmanNet_TSP)
+        self.fc1 = nn.Linear(measurement_dim + state_dim, 64)
+        self.fc2 = nn.Linear(64, 32)
+        self.fc3 = nn.Linear(32, state_dim)
 
-phi = np.empty(n, dtype=np.float64)
-phi[0] = np.random.normal(0, np.sqrt(phase_var))
-for i in range(1, n):
-    phi[i] = ar_coeff * phi[i - 1] + np.random.normal(0, np.sqrt(phase_var))
+        self.activation = nn.ReLU()
 
-gain = np.sqrt(t * h)
+    def forward(self, measurement, previous_state):
+        # Concatenate measurement and previous state
+        x = torch.cat([measurement, previous_state], dim=-1)
 
-for i in range(n):
-    q_rot = q[i] * np.cos(phi[i]) - p[i] * np.sin(phi[i])
-    p_rot = q[i] * np.sin(phi[i]) + p[i] * np.cos(phi[i])
-    qB[i] = gain * q_rot + zq[i]
-    pB[i] = gain * p_rot + zp[i]
+        # Forward pass through the network
+        x = self.activation(self.fc1(x))
+        x = self.activation(self.fc2(x))
+        state_estimate = self.fc3(x)
 
-# 3. Bob measures states (random homodyne basis selection)
-meas_q = np.empty(n, dtype=np.uint8)
-vals_q = np.empty(n, dtype=np.float32)
-b = np.random.randint(low=0, high=2, size=n)
-for i in range(n):
-    if b[i] == 0:
-        meas_q[i] = 0
-        vals_q[i] = qB[i]
-    else:
-        meas_q[i] = 1
-        vals_q[i] = pB[i]
+        return state_estimate
 
-# 4. Key sifting (Alice keeps the quadratures Bob measured)
-x = np.empty(n, dtype=np.float32)
-for i in range(n):
-    if b[i] == 0:
-        x[i] = q[i]
-    else:
-        x[i] = p[i]
 
-# ------------------- UKF Phase Tracking & Correction -------------------------
+def generate_data(num_steps, theta_true, x_values, Q, R):
+    """
+    Generate synthetic data for the model
+    θ_{k+1} = θ_k + q_k
+    y_k = x_k * θ_k + w_k
+    """
+    theta = np.zeros(num_steps)
+    y = np.zeros(num_steps)
 
-# State transition (AR(1))
-def fx(phi_state, dt):
-    # phi_{k+1} = a * phi_k + w_k
-    return ar_coeff * phi_state
+    # Initialize
+    theta[0] = theta_true
 
-# We'll override hx at each step with a closure that knows q[i], p[i], gain, and basis b[i]
-points = MerweScaledSigmaPoints(n=1, alpha=0.1, beta=2.0, kappa=0.0)
-ukf = UKF(dim_x=1, dim_z=1, fx=fx, hx=lambda x: x, dt=1.0, points=points)
+    for k in range(num_steps - 1):
+        # Process noise
+        q_k = np.random.normal(0, np.sqrt(Q))
 
-# Initial UKF settings
-ukf.x = np.array([0.0])        # initial phase estimate
-ukf.P = np.array([[1e-2]])     # initial covariance
-ukf.Q = np.array([[phase_var]])# process noise variance (matches channel innovation)
-ukf.R = np.array([[s]])        # measurement noise variance (matches added Gaussian noise)
+        # State update
+        theta[k + 1] = theta[k] + q_k
 
-phi_est = np.zeros(n, dtype=np.float64)
+        # Measurement noise
+        w_k = np.random.normal(0, np.sqrt(R))
 
-for k in range(n):
-    ukf.predict()
+        # Measurement
+        y[k] = x_values[k] * theta[k] + w_k
 
-    # Measurement model for this k (based on which quadrature Bob measured)
-    if b[k] == 0:
-        # q-basis: z_k = gain * (q*cos(phi) - p*sin(phi)) + noise
-        def hx_local(phi_state, qk=q[k], pk=p[k], g=gain):
-            phi_val = float(phi_state[0]) if np.ndim(phi_state) > 0 else float(phi_state)
-            return np.array([g * (qk * np.cos(phi_val) - pk * np.sin(phi_val))])
-    else:
-        # p-basis: z_k = gain * (q*sin(phi) + p*cos(phi)) + noise
-        def hx_local(phi_state, qk=q[k], pk=p[k], g=gain):
-            phi_val = float(phi_state[0]) if np.ndim(phi_state) > 0 else float(phi_state)
-            return np.array([g * (qk * np.sin(phi_val) + pk * np.cos(phi_val))])
+    # Final measurement
+    w_k = np.random.normal(0, np.sqrt(R))
+    y[-1] = x_values[-1] * theta[-1] + w_k
 
-    ukf.update(np.array([vals_q[k]]), hx=hx_local)
-    phi_est[k] = float(ukf.x[0])
+    return theta, y
 
-# De-rotate Bob's received signals using estimated phase
-cos_m = np.cos(-phi_est)
-sin_m = np.sin(-phi_est)
-qB_corr = qB * cos_m - pB * sin_m
-pB_corr = qB * sin_m + pB * cos_m
 
-# Corrected measured (still in Bob scale). For comparison with Alice, de-gain:
-y_raw = vals_q.astype(np.float64)           # raw measured (Bob scale)
-y_corr = np.where(b == 0, qB_corr, pB_corr) # corrected (Bob scale)
-y_raw_alice_scale  = y_raw  / gain          # scale back to Alice's units
-y_corr_alice_scale = y_corr / gain          # scale back to Alice's units
+def main():
+    # Parameters
+    num_steps = 200
+    Q = 0.1  # Process noise variance
+    R = 0.5  # Measurement noise variance
+    theta_true = 2.0  # True initial state
 
-# ------------------- Results -------------------------
-print("Alice sifted key (first 10):        ", x[10:20])
-print("Bob measured (raw, first 10):       ", y_raw[10:20])
-print("Bob corrected (UKF, first 10):      ", y_corr[10:20])
-print("Raw (Alice scale, first 10):        ", y_raw_alice_scale[:10])
-print("Corrected (Alice scale, first 10):  ", y_corr_alice_scale[:10])
+    # Generate x values (known inputs)
+    x_values = np.random.normal(1, 0.5, num_steps)
 
-# Quick quality metrics
-mse_raw  = np.mean((y_raw_alice_scale  - x)**2)
-mse_corr = np.mean((y_corr_alice_scale - x)**2)
-print(f"\nMSE vs Alice (raw):  {mse_raw:.6e}")
-print(f"MSE vs Alice (UKF):  {mse_corr:.6e}")
+    # Generate data
+    theta_true_seq, measurements = generate_data(num_steps, theta_true, x_values, Q, R)
+
+    # Initialize KalmanNet
+    model = KalmanNetTSP()
+    criterion = nn.MSELoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+
+    # Convert to tensors
+    measurements_tensor = torch.FloatTensor(measurements).unsqueeze(1)
+    x_values_tensor = torch.FloatTensor(x_values).unsqueeze(1)
+
+    # Training
+    num_epochs = 100
+    for epoch in range(num_epochs):
+        model.train()
+        optimizer.zero_grad()
+
+        # Initialize state estimate
+        state_estimate = torch.zeros(1, 1)
+        state_estimates = []
+
+        # Process each time step
+        for k in range(num_steps):
+            # Create input (measurement and previous state)
+            measurement_input = measurements_tensor[k].unsqueeze(0)
+
+            # Forward pass
+            state_estimate = model(measurement_input, state_estimate)
+            state_estimates.append(state_estimate)
+
+        # Calculate loss (compare with true state)
+        state_estimates_tensor = torch.cat(state_estimates)
+        true_states_tensor = torch.FloatTensor(theta_true_seq).unsqueeze(1)
+
+        loss = criterion(state_estimates_tensor, true_states_tensor)
+
+        # Backward pass
+        loss.backward()
+        optimizer.step()
+
+        if (epoch + 1) % 20 == 0:
+            print(f'Epoch [{epoch + 1}/{num_epochs}], Loss: {loss.item():.4f}')
+
+    # Evaluation
+    model.eval()
+    with torch.no_grad():
+        state_estimate = torch.zeros(1, 1)
+        estimated_states = []
+
+        for k in range(num_steps):
+            measurement_input = measurements_tensor[k].unsqueeze(0)
+            state_estimate = model(measurement_input, state_estimate)
+            estimated_states.append(state_estimate.item())
+
+    # Plot results
+    plt.figure(figsize=(12, 6))
+    plt.plot(theta_true_seq, 'b-', label='True State')
+    plt.plot(measurements, 'r.', label='Measurements', alpha=0.5)
+    plt.plot(estimated_states, 'g-', label='Estimated State')
+    plt.title('KalmanNet-TSP State Estimation')
+    plt.xlabel('Time Step')
+    plt.ylabel('State Value')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+
+if __name__ == "__main__":
+    main()
