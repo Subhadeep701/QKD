@@ -97,17 +97,17 @@ class SystemModel:
 
             ########################
             #### State Evolution ###
-            ########################   
+            ########################
             if torch.equal(Q_gen,torch.zeros(self.m,self.m)):# No noise
-                 xt = self.f(self.x_prev)   
+                 xt = self.f(self.x_prev)
             elif self.m == 1: # 1 dim noise
                 xt = self.f(self.x_prev)
                 eq = torch.normal(mean=0, std=Q_gen)
                 # Additive Process Noise
                 xt = torch.add(xt,eq)
-            else:            
+            else:
                 xt = self.f(self.x_prev)
-                mean = torch.zeros([self.m])              
+                mean = torch.zeros([self.m])
                 distrib = MultivariateNormal(loc=mean, covariance_matrix=Q_gen)
                 eq = distrib.rsample()
                 eq = torch.reshape(eq[:], xt.size())
@@ -118,19 +118,19 @@ class SystemModel:
             ### Emission ###
             ################
             yt = self.h(xt)
-            # Observation Noise         
+            # Observation Noise
             if self.n == 1: # 1 dim noise
                 er = torch.normal(mean=0, std=R_gen)
                 # Additive Observation Noise
                 yt = torch.add(yt,er)
-            else:  
-                mean = torch.zeros([self.n])            
+            else:
+                mean = torch.zeros([self.n])
                 distrib = MultivariateNormal(loc=mean, covariance_matrix=R_gen)
                 er = distrib.rsample()
-                er = torch.reshape(er[:], yt.size())       
+                er = torch.reshape(er[:], yt.size())
                 # Additive Observation Noise
                 yt = torch.add(yt,er)
-            
+
             ########################
             ### Squeeze to Array ###
             ########################
@@ -156,10 +156,10 @@ class SystemModel:
             self.m1x_0_rand = torch.zeros(size, self.m, 1)
             if args.distribution == 'uniform':
                 ### if Uniform Distribution for random init
-                for i in range(size):           
+                for i in range(size):
                     initConditions = torch.rand_like(self.m1x_0) * args.variance
-                    self.m1x_0_rand[i,:,0:1] = initConditions.view(self.m,1)     
-            
+                    self.m1x_0_rand[i,:,0:1] = initConditions.view(self.m,1)
+
             elif args.distribution == 'normal':
                 ### if Normal Distribution for random init
                 for i in range(size):
@@ -168,12 +168,12 @@ class SystemModel:
                     self.m1x_0_rand[i,:,0:1] = initConditions
             else:
                 raise ValueError('args.distribution not supported!')
-            
+
             self.Init_batched_sequence(self.m1x_0_rand, self.m2x_0)### for sequence generation
         else: # fixed init
             initConditions = self.m1x_0.view(1,self.m,1).expand(size,-1,-1)
             self.Init_batched_sequence(initConditions, self.m2x_0)### for sequence generation
-    
+
         if(args.randomLength):
             # Allocate Array for Input and Target (use zero padding)
             self.Input = torch.zeros(size, self.n, args.T_max)
@@ -185,7 +185,7 @@ class SystemModel:
                 # Generate Sequence
                 self.GenerateSequence(self.Q, self.R, T_tensor[i].item())
                 # Training sequence input
-                self.Input[i, :, 0:T_tensor[i].item()] = self.y             
+                self.Input[i, :, 0:T_tensor[i].item()] = self.y
                 # Training sequence output
                 self.Target[i, :, 0:T_tensor[i].item()] = self.x
                 # Mask for sequence length
@@ -205,7 +205,7 @@ class SystemModel:
             for t in range(0, T):
                 ########################
                 #### State Evolution ###
-                ########################   
+                ########################
                 if torch.equal(self.Q,torch.zeros(self.m,self.m)):# No noise
                     xt = self.f(self.x_prev)
                 elif self.m == 1: # 1 dim noise
@@ -213,9 +213,9 @@ class SystemModel:
                     eq = torch.normal(mean=torch.zeros(size), std=self.Q).view(size,1,1)
                     # Additive Process Noise
                     xt = torch.add(xt,eq)
-                else:            
+                else:
                     xt = self.f(self.x_prev)
-                    mean = torch.zeros([size, self.m])              
+                    mean = torch.zeros([size, self.m])
                     distrib = MultivariateNormal(loc=mean, covariance_matrix=self.Q)
                     eq = distrib.rsample().view(size,self.m,1)
                     # Additive Process Noise
@@ -232,11 +232,11 @@ class SystemModel:
                     er = torch.normal(mean=torch.zeros(size), std=self.R).view(size,1,1)
                     # Additive Observation Noise
                     yt = torch.add(yt,er)
-                else:  
+                else:
                     yt =  self.h(xt)
-                    mean = torch.zeros([size,self.n])            
+                    mean = torch.zeros([size,self.n])
                     distrib = MultivariateNormal(loc=mean, covariance_matrix=self.R)
-                    er = distrib.rsample().view(size,self.n,1)          
+                    er = distrib.rsample().view(size,self.n,1)
                     # Additive Observation Noise
                     yt = torch.add(yt,er)
 
