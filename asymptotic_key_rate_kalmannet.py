@@ -31,7 +31,7 @@ args = config.general_settings()
 args.N_E = 100 # number of training sequences
 args.N_CV = 50  # number validation sequences
 args.N_T = 500    # number test sequences
-args.T = 5     # sequence length
+args.T = 5   # sequence length
 args.T_test = 5
 
 args.randomInit_train = True
@@ -39,8 +39,8 @@ args.randomInit_cv = True
 args.randomInit_test = True
 
 args.use_cuda = False
-args.n_steps = 15
-args.n_batch = 25
+args.n_steps = 20
+args.n_batch = 40
 args.lr = 1e-3
 args.wd = 1e-4
 
@@ -186,18 +186,6 @@ for i in range(N_test):
     meas_payload[i,0,:] = np.real(r) + rng.normal(0.0, np.sqrt(meas_var), T_payload)
     meas_payload[i,1,:] = np.imag(r) + rng.normal(0.0, np.sqrt(meas_var), T_payload)
 
-# -------------------------------------------------
-# 3) KalmanNet payload phase estimate (linear extrapolation from pilots)
-# -------------------------------------------------
-# def extrapolate_pilot(phi_pilot):
-#     if len(phi_pilot) >= 2:
-#         slope = phi_pilot[-1] - phi_pilot[-2]
-#     else:
-#         slope = 0.0
-#     t = np.arange(1, T_payload + 1)
-#     return phi_pilot[-1] + slope * t
-#
-# phi_kn_payload = np.vstack([extrapolate_pilot(KNet_out_np[i]) for i in range(N_test)])
 phi_kn_payload = np.tile(KNet_out_np[:, -1][:, None], (1, T_payload))
 
 # -------------------------------------------------
@@ -265,9 +253,6 @@ print("3rd sequence pilot estimate  :", KNet_out_np[2, :])
 print("3rd sequence true payload phase    :", phi_payload_true[2, :])
 print("3rd sequence extrapolated payload  :", phi_kn_payload[2, :])  # ← Added line
 
-
-
-
 # -------------------------------------------------
 # 6) Performance summaries
 # -------------------------------------------------
@@ -279,11 +264,3 @@ print(f"Estimated excess noise xi         : {xi_est:.6e} SNU")
 print(f"Holevo bound chi_BE               : {chi_BE:.6f} bits/use")
 print(f"Asymptotic key rate K (beta=0.95) : {key_rate:.6f} bits/use")
 
-# # Optional: scatter plot for quick sanity check
-# plt.figure(figsize=(5,5))
-# plt.scatter(Xa.ravel(), Xb_corr.ravel(), s=8, alpha=0.5)
-# plt.xlabel("Alice X")
-# plt.ylabel("Bob corrected X (KalmanNet)")
-# plt.title("Payload: Alice vs Bob corrected X")
-# plt.grid(True); plt.axis('equal')
-# plt.show()
