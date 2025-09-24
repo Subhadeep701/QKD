@@ -36,8 +36,8 @@ args = config.general_settings()
 args.N_E = 100    # training sequences
 args.N_CV = 50    # validation sequences
 args.N_T = 10000     # test sequences
-args.T = 4       # sequence length
-args.T_test = 4
+args.T = 7      # sequence length
+args.T_test = 7
 args.randomInit_train = True
 args.randomInit_cv = True
 args.randomInit_test = True
@@ -208,8 +208,8 @@ print("\n=== EKF/UKF Baselines ===")
 
 A_amp = 2.0
 phi_signal = 0.0
-Q_proc = float(phase_noise_variance)
-R_meas = float(measurement_noise_variance)
+Q_proc = float(phase_noise_variance**2)
+R_meas = float(measurement_noise_variance**2)
 
 test_input_np  = test_input.cpu().numpy()
 test_target_np = test_target.cpu().numpy()
