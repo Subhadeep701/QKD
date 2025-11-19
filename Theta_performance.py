@@ -4,15 +4,15 @@ from filterpy.kalman import UnscentedKalmanFilter as UKF, MerweScaledSigmaPoints
 from filterpy.kalman import ExtendedKalmanFilter as EKF
 
 # ---------------- Simulation parameters ----------------
-n = 500
+n = 1000
 m = 20
 t = 0.9
 h = 0.85
-s = 0.05
-phase_var = 1e-2
+s = 0.001
+phase_var = 3.5*1e-3
 
 ar_coeff = 0.99
-pilot_interval = 20
+pilot_interval = 10
 
 # Alice's states
 q = np.random.normal(0, np.sqrt(m - 1), n)
@@ -50,6 +50,8 @@ ukf = UKF(dim_x=1, dim_z=1, fx=fx, hx=lambda x: x, dt=1.0, points=points)
 
 ukf.x = np.array([0.0])
 ukf.P = np.array([[1e-2]])
+#ukf.x = np.array([1.5])   # large wrong bias (≈86°)
+#ukf.P = np.array([[5.0]]) # very
 ukf.Q = np.array([[phase_var]])
 ukf.R = np.array([[s]])
 
@@ -91,7 +93,6 @@ for k in range(n):
     ekf.F = F_jacobian(ekf.x, dt=1.0)   # state Jacobian
     ekf.x = f_fx(ekf.x, dt=1.0)         # propagate state
     ekf.predict()                       # propagate covariance
-
     # ---- Update only at pilots ----
     if k % pilot_interval == 0:
         if b[k] == 0:
@@ -252,27 +253,26 @@ print(f"EIKF corrected:           {mse_corr_eikf:.6f}")
 
 
 # ---------------- (1) Phase estimation comparison ----------------
-plt.figure(figsize=(8, 6))
-plt.plot(phi_est, label="UKF estimate", alpha=0.7)
-plt.plot(phi_est_ekf, label="EKF estimate", alpha=0.7)
-plt.plot(phi_est_eikf, label="EIKF estimate", alpha=0.7)
-plt.plot(phi, label="True phase", linewidth=2)
+plt.figure(figsize=(7, 4))
+plt.plot(phi, color="black", linewidth=2, label="True phase")  # ground truth
+plt.plot(phi_est, color="tab:blue", linestyle="--", linewidth=1.5, label="UKF estimate")
+plt.plot(phi_est_ekf, color="tab:orange", linestyle="-.", linewidth=1.5, label="EKF estimate")
 plt.xlabel("Symbol index")
 plt.ylabel("Phase (rad)")
-plt.title("Pilot-aided Phase Tracking: UKF vs EKF vs EIKF")
+#plt.title(f"Pilot-aided Phase Tracking: UKF vs EKF with phase variance {phase_var}")
 plt.legend()
 plt.grid()
 
 # ---------------- (2) Phase estimation error ----------------
-plt.figure(figsize=(8, 6))
-plt.plot(phi - phi_est, label="UKF error")
-plt.plot(phi - phi_est_ekf, label="EKF error", alpha=0.7)
-plt.plot(phi - phi_est_eikf, label="EIKF error", alpha=0.7)
-plt.xlabel("Symbol index")
-plt.ylabel("Error (rad)")
-plt.title("Phase Estimation Error: UKF vs EKF vs EIKF")
-plt.legend()
-plt.grid()
+# plt.figure(figsize=(8, 6))
+# plt.plot(phi - phi_est, label="UKF error")
+# plt.plot(phi - phi_est_ekf, label="EKF error", alpha=0.7)
+# #plt.plot(phi - phi_est_eikf, label="EIKF error", alpha=0.7)
+# plt.xlabel("Symbol index")
+# plt.ylabel("Error (rad)")
+# plt.title("Phase Estimation Error: UKF vs EKF vs EIKF")
+# plt.legend()
+# plt.grid()
 
 
 
@@ -280,4 +280,37 @@ plt.grid()
 plt.tight_layout()
 plt.show()
 
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
 
+fig, ax = plt.subplots(figsize=(10, 4))
+ax.set_xlim(0, n)
+ax.set_ylim(min(phi)-0.5, max(phi)+0.5)
+ax.set_xlabel("Symbol index")
+ax.set_ylabel("Phase (rad)")
+ax.set_title("Phase Tracking: True vs EKF vs UKF")
+
+line_true, = ax.plot([], [], color="black", linewidth=2, label="True phase")
+line_ekf,  = ax.plot([], [], color="tab:orange", linestyle="-.", linewidth=1.5, label="EKF estimate")
+line_ukf,  = ax.plot([], [], color="tab:blue", linestyle="--", linewidth=1.5, label="UKF estimate")
+
+ax.legend()
+
+def init():
+    line_true.set_data([], [])
+    line_ekf.set_data([], [])
+    line_ukf.set_data([], [])
+    return line_true, line_ekf, line_ukf
+
+def animate(i):
+    # gradually extend each line
+    line_true.set_data(range(i), phi[:i])
+    line_ekf.set_data(range(i), phi_est_ekf[:i])
+    line_ukf.set_data(range(i), phi_est[:i])
+    return line_true, line_ekf, line_ukf
+
+ani = animation.FuncAnimation(fig, animate, frames=n, init_func=init,
+                              interval=0.5, blit=True, repeat=False)
+
+plt.show()
+ani.save("Phase_tracking.mp4", writer="ffmpeg", fps=100)
